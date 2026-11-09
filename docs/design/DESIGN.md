@@ -7,8 +7,19 @@ Use OBS's native, theme-aware properties, keyboard navigation, numeric slider
 inputs, colour picker and file picker. Keep one visible editing section at a
 time: Quick, Skin, Face details, Makeup, Light/colour, Preset files, Diagnostics,
 Background removal.
-Quick starts with overall strength, mirror, view and an explicitly applied preset.
-The extra controls default to zero; no automatic retuning of the saved 21 values.
+Quick opens with overall strength and output view. The comparison position
+appears only in split view. Presets and additional options follow in separate
+groups. The extra controls default to zero; no automatic retuning of the saved
+21 values.
+
+The Quick layout draws on three visually inspected references.
+
+- Show the selected output mode clearly and put a numeric value beside the
+  slider. [Elgato Camera Hub settings](https://help.elgato.com/hc/en-us/articles/4405055113357-Elgato-Facecam-Camera-Hub-Settings-Overview#h_01G8EYHB03TVGQ4VRQ9CPDZKRQ)
+- Keep the OBS preview prominent and line up secondary controls in compact
+  groups. [NVIDIA Broadcast camera panel](https://www.nvidia.com/en-us/geforce/broadcasting/broadcast-app/)
+- Keep the active mode and return action in view as the user opens other
+  settings. [Canva recording flow on Mobbin](https://mobbin.com/explore/flows/3400f6b8-9a95-458b-91e6-9b5efa69b5e2)
 
 Face detail labels state the direction of signed controls. Zero keeps the
 current face. All settings persist in the OBS filter. Old browser JSON imports
@@ -43,9 +54,10 @@ the camera. The native filter consumes OBS frames and never opens another camera
 Camera selection/resolution, recording, screenshots and final output use the
 existing OBS controls; document their mapping instead of duplicating them.
 
-Original/split/mask modes affect actual output. Label the mask warning directly
-in the selector and explain returning to the processed view before broadcasting.
-Do not claim a private preview. No hidden auto-save of images or network upload.
+Original/split/mask modes affect actual output. The warning and a button to
+return to processed output stay visible when switching sections. The mask
+option is also marked in the selector. No hidden auto-save of images or network
+upload.
 
 Installer: one primary install/update action, secondary reversible rollback,
 and an always available close/cancel. Show readable Korean, installed location,

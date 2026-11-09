@@ -128,7 +128,7 @@ void preset_tests(obs_source_t*filter,const fs::path&preset,const fs::path&out){
     for(const char*k:control_keys)require(obs_properties_get(props,k)!=nullptr,"Missing original browser slider");
     for(const char*k:extra_keys)require(obs_properties_get(props,k)!=nullptr,"Missing VEIL slider");
     for(const char*k:{"brand","quick_help","shape_help","file_help","diagnostic_help"})require(!obs_properties_get(props,k),"Persistent explanatory paragraphs must not clutter the controls");
-    require(!obs_property_visible(obs_properties_get(props,"preset_result"))&&!obs_property_visible(obs_properties_get(props,"preview_notice")),"Context notices must start hidden in processed view");
+    require(!obs_property_visible(obs_properties_get(props,"preset_result"))&&!obs_property_visible(obs_properties_get(props,"preview_notice"))&&!obs_property_visible(obs_properties_get(props,"preview_reset")),"Context notices and actions must start hidden in processed view");
     require(std::string(obs_property_long_description(obs_properties_get(props,"strength"))).size()>0,"Strength retains optional help");
     auto click=[&](const char*k){auto*p=obs_properties_get(props,k);require(p!=nullptr,"Missing preset action");obs_property_button_clicked(p,filter);};
     click("preset_export");require(fs::exists(out/"roundtrip.json"),"VEIL export failed");
@@ -148,11 +148,39 @@ void preset_tests(obs_source_t*filter,const fs::path&preset,const fs::path&out){
     obs_data_save_json(invalid,(out/"invalid.json").u8string().c_str());obs_data_release(invalid);
     path=obs_data_create();obs_data_set_string(path,"preset_load",(out/"invalid.json").u8string().c_str());obs_source_update(filter,path);obs_data_release(path);click("preset_import");
     loaded=obs_source_get_settings(filter);require(same_settings(expected,loaded),"Invalid preset partially mutated settings");obs_data_release(loaded);
-    path=obs_data_create();obs_data_set_int(path,"section",2);obs_property_modified(obs_properties_get(props,"section"),path);
-    require(obs_property_visible(obs_properties_get(props,"shape"))&&!obs_property_visible(obs_properties_get(props,"skin")),"Section navigation visibility failed");obs_data_release(path);
-    require(!obs_property_visible(obs_properties_get(props,"tracking_status"))&&!obs_property_visible(obs_properties_get(props,"active_preset")),"Face-detail page must prioritize controls over repeated status/preset text");
-    path=obs_data_create();obs_data_set_int(path,"section",0);obs_data_set_int(path,"preview",2);obs_property_modified(obs_properties_get(props,"preview"),path);
-    require(obs_property_visible(obs_properties_get(props,"preview_notice")),"Output-affecting comparison needs a visible contextual notice");obs_data_release(path);
+    auto visible=[&](const char *key){return obs_property_visible(obs_properties_get(props,key));};
+    loaded=obs_source_get_settings(filter);
+    obs_data_set_int(loaded,"section",0);
+    obs_data_set_int(loaded,"preview",2);
+    obs_property_modified(obs_properties_get(props,"preview"),loaded);
+    obs_source_update(filter,loaded);
+    require(visible("quick")&&visible("split")&&visible("preview_notice")&&visible("preview_reset"),
+            "Split output must show its position, warning and return action");
+
+    obs_data_set_int(loaded,"section",2);
+    obs_property_modified(obs_properties_get(props,"section"),loaded);
+    require(visible("shape")&&!visible("skin")&&!visible("quick_presets")&&!visible("quick_options")&&!visible("tools"),
+            "Face details must show only their own settings");
+    require(!visible("split")&&visible("preview_notice")&&visible("preview_reset"),
+            "Changing section must keep the warning and return action while comparison is on air");
+    click("preview_reset");
+    require(obs_data_get_int(loaded,"preview")==0&&obs_data_get_int(loaded,"section")==2&&same_settings(expected,loaded),
+            "Returning to processed output must preserve the selected section and saved look");
+    require(visible("shape")&&!visible("split")&&!visible("preview_notice")&&!visible("preview_reset"),
+            "Returning to processed output must hide comparison-only controls");
+
+    obs_data_set_int(loaded,"section",0);
+    obs_data_set_int(loaded,"preview",3);
+    obs_property_modified(obs_properties_get(props,"preview"),loaded);
+    obs_data_set_int(loaded,"section",5);
+    obs_property_modified(obs_properties_get(props,"section"),loaded);
+    require(visible("files")&&visible("preview_notice"),"Preset files must retain the active output warning");
+    obs_data_set_string(loaded,"preset_load",preset.u8string().c_str());
+    obs_source_update(filter,loaded);
+    click("preset_import");
+    require(obs_data_get_int(loaded,"preview")==0&&visible("preset_result")&&!visible("preview_notice")&&!visible("preview_reset"),
+            "Preset import must clear the output warning when it restores processed output");
+    obs_data_release(loaded);
     // OBS invokes every modified callback when reopening properties. It must not
     // overwrite imported colours with a stale palette selection.
     loaded=obs_source_get_settings(filter);obs_properties_apply_settings(props,loaded);require(same_settings(expected,loaded),"Opening properties changed the saved look");obs_data_release(loaded);
