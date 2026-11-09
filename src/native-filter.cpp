@@ -266,6 +266,8 @@ obs_data_t *export_preset(obs_data_t*d)
  obs_data_set_obj(p,"background",background);obs_data_release(background);
  obs_data_release(v);obs_data_release(c);return p;
 }
+bool section_changed(obs_properties_t*,obs_property_t*,obs_data_t*);
+
 bool preset_click(obs_properties_t *props,obs_property_t *property,void *data)
 {
  auto*f=static_cast<Filter*>(data);if(!f)return false;
@@ -300,6 +302,7 @@ bool preset_click(obs_properties_t *props,obs_property_t *property,void *data)
  if(success&&action!="preset_export"){
   if(with_background)background_success=veil::background_apply_preset(f->source,d);
   obs_source_update(f->source,d);
+  section_changed(props,nullptr,d);
  }
  message=success?(action=="preset_export"?"현재 설정을 저장했습니다.":"프리셋을 적용했습니다."):
   "프리셋을 처리하지 못했습니다. VEIL·브라우저 프리셋 파일인지, 저장 경로가 .json으로 끝나는지 확인해 주세요.";
@@ -317,12 +320,33 @@ bool section_changed(obs_properties_t*p,obs_property_t*,obs_data_t*d)
  int section=int(obs_data_get_int(d,"section"));
  const char*groups[]={"quick","skin","shape","makeup","colour","files","tools","background"};
  for(int i=0;i<8;++i)obs_property_set_visible(obs_properties_get(p,groups[i]),i==section);
- obs_property_set_visible(obs_properties_get(p,"tracking_status"),section==0||section==6);
- obs_property_set_visible(obs_properties_get(p,"active_preset"),section==0||section==5);
+ obs_property_set_visible(obs_properties_get(p,"quick_presets"),section==0);
+ obs_property_set_visible(obs_properties_get(p,"quick_options"),section==0);
  obs_property_set_visible(obs_properties_get(p,"preset_result"),false);
- obs_property_set_visible(obs_properties_get(p,"preview_notice"),section==0&&obs_data_get_int(d,"preview")!=0);
- obs_property_set_visible(obs_properties_get(p,"split"),obs_data_get_int(d,"preview")==2);
+ const int preview=std::clamp(int(obs_data_get_int(d,"preview")),0,3);
+ const char *output_notices[]={
+  "",
+  "원본 영상이 방송과 녹화에 표시됩니다.",
+  "좌우 비교 화면이 방송과 녹화에 표시됩니다.",
+  "마스크 화면이 방송과 녹화에 표시됩니다.",
+ };
+ auto *notice=obs_properties_get(p,"preview_notice");
+ obs_property_set_description(notice,output_notices[preview]);
+ obs_property_set_visible(notice,preview!=0);
+ obs_property_set_visible(obs_properties_get(p,"preview_reset"),preview!=0);
+ obs_property_set_visible(obs_properties_get(p,"split"),section==0&&preview==2);
  obs_property_set_visible(obs_properties_get(p,"lookAmount"),obs_data_get_int(d,"look")!=0);
+ return true;
+}
+bool reset_preview(obs_properties_t *props, obs_property_t *, void *data)
+{
+ auto *filter=static_cast<Filter*>(data);
+ if(!filter)return false;
+ auto *settings=obs_source_get_settings(filter->source);
+ obs_data_set_int(settings,"preview",0);
+ obs_source_update(filter->source,settings);
+ section_changed(props,nullptr,settings);
+ obs_data_release(settings);
  return true;
 }
 bool refresh_status(obs_properties_t*p,obs_property_t*,void*data)
@@ -358,28 +382,36 @@ obs_properties_t *properties(void *data)
  const char*sections[]={"빠른 설정","피부","얼굴 디테일","메이크업","빛·색감","프리셋","상태","배경 필터 안내"};
  for(int i=0;i<8;++i)obs_property_list_add_int(nav,sections[i],i);
  obs_property_set_modified_callback(nav,section_changed);
- std::string status="필터를 추가하면 얼굴 인식을 시작합니다.";
- if(f){std::lock_guard<std::mutex>lock(f->mutex);status=f->input_waiting?"카메라에서 새 영상이 들어오기를 기다리고 있습니다.":f->status;}
- obs_properties_add_text(p,"tracking_status",status.c_str(),OBS_TEXT_INFO);
- auto*current=f?obs_source_get_settings(f->source):nullptr;
- obs_properties_add_text(p,"active_preset",current?obs_data_get_string(current,"preset_name"):"내 방송 설정",OBS_TEXT_INFO);
- obs_data_release(current);
- auto*quick=obs_properties_create();
- obs_property_set_long_description(obs_properties_add_int_slider(quick,"strength","전체 보정",0,100,1),"0은 얼굴·색감 보정을 끕니다. 좌우 반전과 별도 배경 필터는 유지됩니다.");
- obs_properties_add_bool(quick,"mirror","좌우 반전");
- obs_property_set_long_description(obs_properties_add_bool(quick,"natural","자연스러운 얼굴형"),"얼굴 변형이 겹칠 때 과도한 늘어남을 줄입니다. 끄면 이전 보정 방식을 사용합니다.");
- auto*mode=obs_properties_add_list(quick,"preview","보기",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
- obs_property_list_add_int(mode,"보정 영상",0);obs_property_list_add_int(mode,"원본 확인",1);
- obs_property_list_add_int(mode,"좌우 비교 · 왼쪽 원본",2);obs_property_list_add_int(mode,"마스크 확인 · 방송 화면에도 표시됨",3);
- obs_property_set_modified_callback(mode,section_changed);
- auto*notice=obs_properties_add_text(quick,"preview_notice","이 보기가 방송에도 표시됩니다.",OBS_TEXT_INFO);
+
+ auto*notice=obs_properties_add_text(p,"preview_notice","",OBS_TEXT_INFO);
  obs_property_text_set_info_type(notice,OBS_TEXT_INFO_WARNING);
- obs_properties_add_int_slider(quick,"split","비교선 위치",0,100,1);
- auto*builtin=obs_properties_add_list(quick,"builtin","기본 프리셋",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
+ obs_properties_add_button2(p,"preview_reset","보정 영상으로 돌아가기",reset_preview,f);
+
+ auto*quick=obs_properties_create();
+ auto*strength=obs_properties_add_int_slider(quick,"strength","전체 보정 강도",0,100,1);
+ obs_property_int_set_suffix(strength,"%");
+ obs_property_set_long_description(strength,"0%는 얼굴·색감 보정을 끕니다. 좌우 반전과 별도 배경 필터는 유지됩니다.");
+ auto*mode=obs_properties_add_list(quick,"preview","출력 보기",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
+ obs_property_list_add_int(mode,"보정 영상",0);obs_property_list_add_int(mode,"원본 확인",1);
+ obs_property_list_add_int(mode,"좌우 비교 · 왼쪽 원본",2);obs_property_list_add_int(mode,"마스크 확인 · 방송에 표시됨",3);
+ obs_property_set_modified_callback(mode,section_changed);
+ obs_property_int_set_suffix(obs_properties_add_int_slider(quick,"split","비교선 위치",0,100,1),"%");
+ obs_properties_add_group(p,"quick","보정과 출력",OBS_GROUP_NORMAL,quick);
+
+ auto*presets=obs_properties_create();
+ auto*current=f?obs_source_get_settings(f->source):nullptr;
+ obs_properties_add_text(presets,"active_preset",current?obs_data_get_string(current,"preset_name"):"내 방송 설정",OBS_TEXT_INFO);
+ obs_data_release(current);
+ auto*builtin=obs_properties_add_list(presets,"builtin","기본 프리셋",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
  obs_property_list_add_int(builtin,"내가 저장한 방송 설정",-1);
  for(size_t i=0;i<std::size(builtins);++i)obs_property_list_add_int(builtin,builtins[i].label,int(i));
- obs_properties_add_button2(quick,"preset_builtin","프리셋 적용",preset_click,f);
- obs_properties_add_group(p,"quick","빠른 설정",OBS_GROUP_NORMAL,quick);
+ obs_properties_add_button2(presets,"preset_builtin","프리셋 적용",preset_click,f);
+ obs_properties_add_group(p,"quick_presets","프리셋",OBS_GROUP_NORMAL,presets);
+
+ auto*options=obs_properties_create();
+ obs_properties_add_bool(options,"mirror","좌우 반전");
+ obs_property_set_long_description(obs_properties_add_bool(options,"natural","자연스러운 얼굴형"),"얼굴 변형이 겹칠 때 과도한 늘어남을 줄입니다. 끄면 이전 보정 방식을 사용합니다.");
+ obs_properties_add_group(p,"quick_options","추가 설정",OBS_GROUP_NORMAL,options);
  const char *names[]={"피부","얼굴 디테일","메이크업","빛·색감"};
  const char *ids[]={"skin","shape","makeup","colour"};
  const size_t boundaries[]={0,5,10,14,21};
@@ -415,6 +447,9 @@ obs_properties_t *properties(void *data)
  obs_property_set_long_description(obs_properties_get(files,"preset_import"),"브라우저·이전 VEIL 프리셋도 지원합니다. 배경을 포함한 파일은 배경 필터에도 함께 적용합니다.");
  obs_properties_add_group(p,"files","프리셋 관리",OBS_GROUP_NORMAL,files);
  auto*tools=obs_properties_create();
+ std::string status="필터를 추가하면 얼굴 인식을 시작합니다.";
+ if(f){std::lock_guard<std::mutex>lock(f->mutex);status=f->input_waiting?"카메라에서 새 영상이 들어오기를 기다리고 있습니다.":f->status;}
+ obs_properties_add_text(tools,"tracking_status",status.c_str(),OBS_TEXT_INFO);
  obs_properties_add_button2(tools,"refresh_status","상태 새로고침",refresh_status,f);
  obs_property_set_long_description(obs_properties_get(tools,"refresh_status"),"얼굴 인식 상태를 갱신합니다. 한 얼굴을 기준으로 동작하며, 카메라·해상도는 OBS 영상 캡처 장치 속성에서 변경합니다.");
  obs_properties_add_text(tools,"version","VEIL " VEIL_VERSION,OBS_TEXT_INFO);
